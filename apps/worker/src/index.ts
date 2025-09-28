@@ -66,7 +66,7 @@ if (cluster.isPrimary) {
             "/"
           )}:/usr/src/app" python:3.9 sh -c "python /usr/src/app/${path.basename(
             codeFilePath
-          )} /usr/src/app/input.txt"`;
+          )} < /usr/src/app/input.txt"`;
           break;
 
         case "cpp":
