@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import MonacoEditor from '@monaco-editor/react';
 import { userAtom } from "../atoms/userAtom";
 import { useRecoilState } from "recoil";
-import { AiOutlineLoading3Quarters, AiOutlineSend } from "react-icons/ai"; // Import spinner and send icon
+import { AiOutlineLoading3Quarters, AiOutlineSend, AiOutlineCopy, AiOutlineCheck } from "react-icons/ai"; // Import icons
 import { socketAtom } from "../atoms/socketAtom";
 import { useNavigate, useParams } from "react-router-dom";
 import { connectedUsersAtom } from "../atoms/connectedUsersAtom";
@@ -14,16 +14,28 @@ type AiMessage = {
   text: string;
 };
 
+// Type for an Input/Output session
+type IOSession = {
+  id: number;
+  input: string;
+  output: string[];
+};
+
 const CodeEditor: React.FC = () => {
   const [code, setCode] = useState<any>("// Write your code here...");
   const [language, setLanguage] = useState("javascript");
-  const [output, setOutput] = useState<string[]>([]); // Output logs
   const [socket, setSocket] = useRecoilState<WebSocket | null>(socketAtom);
   const [isLoading, setIsLoading] = useState(false); // Loading state for code submission
   const [currentButtonState, setCurrentButtonState] = useState("Run Code");
-  const [input, setInput] = useState<string>(""); // Input for code
   const [user, setUser] = useRecoilState(userAtom);
   const navigate = useNavigate();
+  const [isCopied, setIsCopied] = useState(false);
+
+  // --- I/O Tabs State ---
+  const [ioSessions, setIoSessions] = useState<IOSession[]>([{ id: 1, input: "", output: [] }]);
+  const [activeIoSessionId, setActiveIoSessionId] = useState<number>(1);
+  const activeSession = ioSessions.find(s => s.id === activeIoSessionId) || ioSessions[0];
+
 
   // AI Assistant State
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
@@ -36,40 +48,40 @@ const CodeEditor: React.FC = () => {
   const [connectedUsers, setConnectedUsers] = useRecoilState<any[]>(connectedUsersAtom);
   const params = useParams();
 
+  // Handle Ctrl+Enter to run code
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        if (!isLoading) {
+          handleSubmit();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isLoading, code, activeSession]); // Rerun if dependencies change
+
+
   // WebSocket connection logic
   useEffect(() => {
-
     if (!socket) {
       navigate("/" + params.roomId);
     }
     else {
-      // request to get all users on start
-      socket.send(
-        JSON.stringify({
-          type: "requestToGetUsers",
-          userId: user.id
-        })
-      );
-
-
-      // request to get all data on start
-      socket.send(
-        JSON.stringify({
-          type: "requestForAllData",
-        })
-      );
+      socket.send(JSON.stringify({ type: "requestToGetUsers", userId: user.id }));
+      socket.send(JSON.stringify({ type: "requestForAllData" }));
       socket.onclose = () => {
         console.log("Connection closed");
-        setUser({
-          id: "",
-          name: "",
-          roomId: "",
-        })
+        setUser({ id: "", name: "", roomId: "" });
         setSocket(null);
       }
     }
     return () => {
-      // Clean up the socket connection when the component unmounts
       if (socket && socket.readyState === WebSocket.OPEN) {
         socket.close();
       }
@@ -81,80 +93,49 @@ const CodeEditor: React.FC = () => {
     if (socket) {
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        // on change of user
-        if (data.type === "users") {
-          setConnectedUsers(data.users);
-        }
-        // on change of code
-        if (data.type === "code") {
-          setCode(data.code);
-        }
-
-        // on change of input
-        if (data.type === "input") {
-          setInput(data.input);
-        }
-
-        // on change of language
-        if (data.type === "language") {
-          setLanguage(data.language);
-        }
-
-        // on change of Submit Button Status
+        if (data.type === "users") setConnectedUsers(data.users);
+        if (data.type === "code") setCode(data.code);
+        if (data.type === "language") setLanguage(data.language);
         if (data.type === "submitBtnStatus") {
           setCurrentButtonState(data.value);
           setIsLoading(data.isLoading);
         }
+        // ... other message types
 
-        // on change of output
+        // Handle I/O session updates
+        if (data.type === "ioSessions") setIoSessions(data.sessions);
+        if (data.type === "activeIoSession") setActiveIoSessionId(data.sessionId);
         if (data.type === "output") {
-          setOutput((prevOutput) => [...prevOutput, data.message]);
+          console.log(data)
+          setIoSessions(prev => prev.map(s => s.id === data.sessionId ? { ...s, output: [...s.output, data.message] } : s));
           handleButtonStatus("Run Code", false);
         }
 
-        // on receive cursor position
-        if (data.type === "cursorPosition") {
-          // Update cursor position for the user
-          const updatedUsers = connectedUsers.map((user) => {
-            if (user.id === data.userId) {
-              return { ...user, cursorPosition: data.cursorPosition };
-            }
-            return user;
-          });
-          setConnectedUsers(updatedUsers);
+        if (data.type === "requestForAllData" && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({
+            type: "allData",
+            code,
+            language,
+            currentButtonState,
+            isLoading,
+            ioSessions,
+            activeIoSessionId,
+            userId: data.userId
+          }));
         }
 
-        // send all data to new user on join  
-        if (data.type === "requestForAllData") {
-          // Ensure socket is open before sending
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(
-              JSON.stringify({
-                type: "allData",
-                code: code,
-                input: input,
-                language: language,
-                currentButtonState: currentButtonState,
-                isLoading: isLoading,
-                userId: data.userId
-              })
-            );
-          }
-        }
-
-        // on receive all data
         if (data.type === "allData") {
           setCode(data.code);
-          setInput(data.input);
           setLanguage(data.language);
           setCurrentButtonState(data.currentButtonState);
           setIsLoading(data.isLoading);
+          setIoSessions(data.ioSessions || [{ id: 1, input: "", output: [] }]); // fallback for older clients
+          setActiveIoSessionId(data.activeIoSessionId || 1);
         }
       };
     }
-  }, [code, input, language, currentButtonState, isLoading, socket, connectedUsers]);
+  }, [code, language, currentButtonState, isLoading, socket, connectedUsers, ioSessions, activeIoSessionId]);
 
-  // Scroll to the bottom of the AI chat on new message
   useEffect(() => {
     aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [aiMessages]);
@@ -162,38 +143,33 @@ const CodeEditor: React.FC = () => {
 
   const handleSubmit = async () => {
     handleButtonStatus("Submitting...", true);
-    setOutput([]); // Clear previous output
+    // Clear output for the current tab only
+    setIoSessions(prev => prev.map(s => s.id === activeIoSessionId ? { ...s, output: [] } : s));
+
     const submission = {
       code,
       language,
       roomId: user.roomId,
-      input
+      input: activeSession.input,
+      sessionId: activeIoSessionId // Send session ID with submission
     };
 
     try {
       const res = await fetch(`http://${IP_ADDRESS}:3000/submit`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(submission),
       });
 
       handleButtonStatus("Compiling...", true);
 
       if (!res.ok) {
-        setOutput((prevOutput) => [
-          ...prevOutput,
-          "Error submitting code. Please try again.",
-        ]);
+        setIoSessions(prev => prev.map(s => s.id === activeIoSessionId ? { ...s, output: [...s.output, "Error submitting code. Please try again."] } : s));
         handleButtonStatus("Run Code", false);
       }
     } catch (error) {
       console.error("Submission failed:", error);
-      setOutput((prevOutput) => [
-        ...prevOutput,
-        "Failed to connect to the execution server.",
-      ]);
+      setIoSessions(prev => prev.map(s => s.id === activeIoSessionId ? { ...s, output: [...s.output, "Failed to connect to the execution server."] } : s));
       handleButtonStatus("Run Code", false);
     }
   };
@@ -214,125 +190,89 @@ const CodeEditor: React.FC = () => {
     Provide hints, ask leading questions, and explain concepts.
     Do not write the correct code for them unless they are completely stuck and explicitly ask for the solution.
     Keep your responses concise and encouraging.`;
-
-    // Construct the context-rich prompt for the AI
     const userQuery = `
       Here is my current situation:
       Language: ${language}
-      Code:
-      \`\`\`${language}
-      ${code}
-      \`\`\`
-      Input given to the code:
-      \`\`\`
-      ${input || "No input provided."}
-      \`\`\`
-      Output from the code:
-      \`\`\`
-      ${output.join('\n') || "No output yet."}
-      \`\`\`
+      Code:\n\`\`\`${language}\n${code}\n\`\`\`
+      Input given to the code:\n\`\`\`\n${activeSession.input || "No input provided."}\n\`\`\`
+      Output from the code:\n\`\`\`\n${activeSession.output.join('\n') || "No output yet."}\n\`\`\`
       My question is: ${currentAiInput}
     `;
 
     try {
-      const apiKey = ""; // Leave empty, will be handled by environment
+      const apiKey = "AIzaSyCRGNHRid5tWcp99bMzklWNY_hK9T4ePnc";
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-
       const payload = {
         contents: [{ parts: [{ text: userQuery }] }],
-        systemInstruction: {
-          parts: [{ text: systemPrompt }]
-        },
+        systemInstruction: { parts: [{ text: systemPrompt }] },
       };
-
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
-      if (!response.ok) {
-        throw new Error(`API call failed with status: ${response.status}`);
-      }
-
+      if (!response.ok) throw new Error(`API call failed: ${response.status}`);
       const result = await response.json();
       const candidate = result.candidates?.[0];
-
-      let aiResponseText = "Sorry, I couldn't generate a response. Please try again.";
-      if (candidate && candidate.content?.parts?.[0]?.text) {
-        aiResponseText = candidate.content.parts[0].text;
-      }
-
-      const aiMessage: AiMessage = { sender: 'ai', text: aiResponseText };
-      setAiMessages(prev => [...prev, aiMessage]);
-
+      const aiResponseText = candidate?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response.";
+      setAiMessages(prev => [...prev, { sender: 'ai', text: aiResponseText }]);
     } catch (error) {
       console.error("Error calling Gemini API:", error);
-      const errorMessage: AiMessage = { sender: 'ai', text: "There was an error connecting to the AI assistant. Please check the console for details." };
-      setAiMessages(prev => [...prev, errorMessage]);
+      setAiMessages(prev => [...prev, { sender: 'ai', text: "Error connecting to the AI assistant." }]);
     } finally {
       setIsAiLoading(false);
     }
   };
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText(user.roomId);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000); // Reset after 2 seconds
+  };
 
-  // handle input change multiple user
+  const syncIoSessions = (newSessions: IOSession[]) => {
+    setIoSessions(newSessions);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "ioSessions", sessions: newSessions, roomId: user.roomId }));
+    }
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
-    setInput(newValue);
+    const newSessions = ioSessions.map(s => s.id === activeIoSessionId ? { ...s, input: newValue } : s);
+    syncIoSessions(newSessions);
+  };
+
+  const handleAddSession = () => {
+    const newSessionId = (ioSessions[ioSessions.length - 1]?.id || 0) + 1;
+    const newSessions = [...ioSessions, { id: newSessionId, input: "", output: [] }];
+    syncIoSessions(newSessions);
+    handleSwitchSession(newSessionId);
+  };
+
+  const handleSwitchSession = (id: number) => {
+    setActiveIoSessionId(id);
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({
-          type: "input",
-          input: newValue,
-          roomId: user.roomId
-        })
-      );
+      socket.send(JSON.stringify({ type: "activeIoSession", sessionId: id, roomId: user.roomId }));
     }
   }
 
-  // handle language change multiple user
   const handleLanguageChange = (value: string) => {
     setLanguage(value);
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({
-          type: "language",
-          language: value,
-          roomId: user.roomId
-        })
-      );
-    }
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "language", language: value, roomId: user.roomId }));
   }
 
-  // handle submit button status multiple user
   const handleButtonStatus = (value: string, isLoading: boolean) => {
     setCurrentButtonState(value);
     setIsLoading(isLoading);
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({
-          type: "submitBtnStatus",
-          value: value,
-          isLoading: isLoading,
-          roomId: user.roomId
-        })
-      );
-    }
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "submitBtnStatus", value, isLoading, roomId: user.roomId }));
   }
 
   const handleEditorDidMount = (editor: any, monaco: any) => {
     editor.onDidChangeModelContent(() => {
       const currentCode = editor.getValue();
-      // Only send if the code has actually changed to avoid loops
-      if (currentCode !== code && socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(
-          JSON.stringify({
-            type: "code",
-            code: currentCode,
-            roomId: user.roomId
-          })
-        );
+      if (currentCode !== code && socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "code", code: currentCode, roomId: user.roomId }));
       }
     });
   };
@@ -341,7 +281,6 @@ const CodeEditor: React.FC = () => {
     <div className="min-h-screen bg-black text-gray-300 font-sans p-4">
       <div className="flex flex-col lg:flex-row gap-4 h-[calc(100vh-2rem)]">
 
-        {/* Left Side: Code Editor */}
         <div className="flex flex-col w-full lg:w-2/3">
           <div className="flex justify-between items-center mb-4">
             <h1 className="text-2xl font-bold text-gray-200">Code Together</h1>
@@ -349,7 +288,7 @@ const CodeEditor: React.FC = () => {
               <select
                 value={language}
                 onChange={(e) => handleLanguageChange(e.target.value)}
-                className="bg-gray-800 border border-gray-700 text-white px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300"
+                className="bg-gray-800 border border-gray-700 text-white px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="javascript">JavaScript</option>
                 <option value="python">Python</option>
@@ -360,7 +299,7 @@ const CodeEditor: React.FC = () => {
               </select>
               <button
                 onClick={handleSubmit}
-                className={`bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md shadow-lg transition-all duration-300 transform flex items-center justify-center gap-2 ${isLoading ? 'opacity-60 cursor-not-allowed' : 'hover:scale-105'}`}
+                className={`bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md shadow-lg transition-all flex items-center justify-center gap-2 ${isLoading ? 'opacity-60 cursor-not-allowed' : 'hover:scale-105'}`}
                 disabled={isLoading}
               >
                 {isLoading && <AiOutlineLoading3Quarters className="animate-spin" />}
@@ -380,10 +319,7 @@ const CodeEditor: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Side: AI, I/O, and Users */}
         <div className="w-full lg:w-1/3 flex flex-col gap-4">
-
-          {/* AI Assistant */}
           <div className="bg-gray-900 border border-gray-800 rounded-lg shadow-2xl flex flex-col flex-grow h-1/2">
             <h2 className="text-xl font-bold text-gray-300 p-3 border-b border-gray-800">AI Assistant</h2>
             <div className="flex-grow p-4 overflow-y-auto space-y-4">
@@ -425,7 +361,6 @@ const CodeEditor: React.FC = () => {
           </div>
 
           <div className="flex-grow flex flex-col gap-4 h-1/2">
-            {/* Users & Room */}
             <div className="flex gap-4">
               <div className="w-1/2 bg-gray-900 border border-gray-800 p-3 rounded-lg">
                 <h2 className="text-lg font-semibold text-gray-400 mb-2">Users</h2>
@@ -442,34 +377,52 @@ const CodeEditor: React.FC = () => {
               </div>
               <div className="w-1/2 bg-gray-900 border border-gray-800 p-3 rounded-lg">
                 <h2 className="text-lg font-semibold text-gray-400 mb-2">Invite Code</h2>
-                <p className="text-green-400 font-mono bg-gray-800 p-2 rounded select-all" onClick={() => navigator.clipboard.writeText(user.roomId)}>{user.roomId || '...'}</p>
-
-              </div>
-            </div>
-
-            {/* Input & Output */}
-            <div className="flex-grow flex gap-4">
-              <div className="w-1/2 flex flex-col">
-                <h2 className="text-lg font-semibold text-gray-400 mb-2">Input</h2>
-                <textarea
-                  value={input}
-                  onChange={handleInputChange}
-                  placeholder="Enter input..."
-                  className="bg-gray-800 border border-gray-700 text-white w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm flex-grow"
-                />
-              </div>
-              <div className="w-1/2 flex flex-col">
-                <div className="flex justify-between items-center mb-2">
-                  <h2 className="text-lg font-semibold text-gray-400">Output</h2>
-                  <button onClick={() => setOutput([])} className="text-red-500 hover:text-red-400 text-sm">Clear</button>
-                </div>
-                <div className="bg-gray-800 border border-gray-700 text-green-400 p-2 rounded-md flex-grow overflow-y-auto font-mono text-sm">
-                  {output.length > 0 ? output.map((line, index) => <pre key={index} className="whitespace-pre-wrap">{line}</pre>) : <p className="text-gray-500">No output yet.</p>}
+                <div className="flex items-center gap-2">
+                  <p className="text-green-400 font-mono bg-gray-800 p-2 rounded select-all w-full truncate">{user.roomId || '...'}</p>
+                  <button onClick={handleCopy} className="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded-md">
+                    {isCopied ? <AiOutlineCheck /> : <AiOutlineCopy />}
+                  </button>
                 </div>
               </div>
             </div>
+
+            {/* Input & Output Tabs */}
+            <div className="flex-grow flex flex-col bg-gray-900 border border-gray-800 rounded-lg">
+              <div className="flex border-b border-gray-800">
+                {ioSessions.map(session => (
+                  <button
+                    key={session.id}
+                    onClick={() => handleSwitchSession(session.id)}
+                    className={`px-4 py-2 text-sm ${activeIoSessionId === session.id ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800/50'}`}
+                  >
+                    Tab {session.id}
+                  </button>
+                ))}
+                <button onClick={handleAddSession} className="px-4 py-2 text-sm text-blue-400 hover:bg-gray-800/50">+</button>
+              </div>
+              <div className="flex-grow flex gap-4 p-3">
+                <div className="w-1/2 flex flex-col">
+                  <h2 className="text-lg font-semibold text-gray-400 mb-2">Input</h2>
+                  <textarea
+                    value={activeSession.input}
+                    onChange={handleInputChange}
+                    placeholder="Enter input..."
+                    className="bg-gray-800 border border-gray-700 text-white w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm flex-grow"
+                  />
+                </div>
+                <div className="w-1/2 flex flex-col">
+                  <div className="flex justify-between items-center mb-2">
+                    <h2 className="text-lg font-semibold text-gray-400">Output</h2>
+                    <button onClick={() => setIoSessions(prev => prev.map(s => s.id === activeIoSessionId ? { ...s, output: [] } : s))} className="text-red-500 hover:text-red-400 text-sm">Clear</button>
+                  </div>
+                  <div className="bg-gray-800 border border-gray-700 text-green-400 p-2 rounded-md flex-grow overflow-y-auto font-mono text-sm">
+                    {activeSession.output.length > 0 ? activeSession.output.map((line, index) => <pre key={index} className="whitespace-pre-wrap">{line}</pre>) : <p className="text-gray-500">No output yet.</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
-
         </div>
       </div>
     </div>

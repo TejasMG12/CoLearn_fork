@@ -71,10 +71,15 @@ async function process() {
 
     pubSubClient.subscribe(roomId, (message) => {
       // Broadcast message to all users in the room
+      const { result, sessionId } = JSON.parse(message);
       rooms[roomId].forEach((user: any) => {
         if (user.userId === userId) {
-          user.ws.send(JSON.stringify({ type: "output", message }));
-          console.log("Output sent to user id", user.id);
+          user.ws.send(JSON.stringify({
+            type: "output",
+            message: result,
+            sessionId
+          }));
+          console.log("Output sent to user id", user.userId, "with sessionId", sessionId);
         }
       });
     });
@@ -99,7 +104,7 @@ async function process() {
 
       // request for starter data on new user join
       if (data.type == "requestForAllData") {
-        
+
 
         const otherUser = rooms[roomId].find(
           (user: any) => user.userId !== userId
@@ -152,6 +157,7 @@ async function process() {
                 type: "submitBtnStatus",
                 value: data.value,
                 isLoading: data.isLoading,
+
               })
             );
           }
@@ -169,12 +175,12 @@ async function process() {
 
       // send all data to new user
       if (data.type === "allData") {
-       
-        
+
+
         rooms[roomId].forEach((user: any) => {
           if (user.userId === data.userId) {
-            console.log("sending all data to", user.name , "and data is", data);
-            
+            console.log("sending all data to", user.name, "and data is", data);
+
             user.ws.send(
               JSON.stringify({
                 type: "allData",

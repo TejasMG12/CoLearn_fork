@@ -27,7 +27,7 @@ if (cluster.isPrimary) {
   const pubClient = createClient();
 
   async function processSubmission(submission: any) {
-    const { code, language, roomId, submissionId, input } =
+    const { code, language, roomId, submissionId, input, sessionId } =
       JSON.parse(submission);
     console.log(
       `Processing submission for room id: ${roomId}, submission id: ${submissionId}`
@@ -112,7 +112,9 @@ sh -c "g++ /usr/src/app/userCode.cpp -o /usr/src/app/a.out && /usr/src/app/a.out
       console.log(`Result for room ${roomId}: ${result}`);
 
       try {
-        await pubClient.publish(roomId, result);
+        // publish result + sessionId together as JSON
+        const payload = JSON.stringify({ result, sessionId });
+        await pubClient.publish(roomId, payload);
       } catch (err) {
         console.error("Failed to publish result to Redis:", err);
       }

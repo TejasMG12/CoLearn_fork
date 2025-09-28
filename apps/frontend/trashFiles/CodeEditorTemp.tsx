@@ -321,8 +321,42 @@ const CodeEditor: React.FC = () => {
         <div className="w-full lg:w-1/3 flex flex-col gap-4">
           <div className="bg-gray-900 border border-gray-800 rounded-lg shadow-2xl flex flex-col flex-grow h-1/2">
             <h2 className="text-xl font-bold text-gray-300 p-3 border-b border-gray-800">AI Assistant</h2>
-            <div className="flex-grow p-4 overflow-y-auto space-y-4">{/* AI Messages UI */}</div>
-            <form onSubmit={handleAiSubmit} className="p-3 border-t border-gray-800 flex gap-2">{/* AI Form UI */}</form>
+            <div className="flex-grow p-4 overflow-y-auto space-y-4">
+              {aiMessages.length > 0 ? (
+                aiMessages.map((msg, index) => (
+                  <div key={index} className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : ''}`}>
+                    {msg.sender === 'ai' && <div className="w-8 h-8 rounded-full bg-blue-500 flex-shrink-0 flex items-center justify-center font-bold">A</div>}
+                    <div className={`max-w-xs md:max-w-md lg:max-w-sm rounded-lg px-4 py-2 ${msg.sender === 'user' ? 'bg-gray-700' : 'bg-gray-800'}`}>
+                      <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500 text-center mt-4">Ask the AI for a hint or to explain a concept!</p>
+              )}
+              {isAiLoading && (
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-500 flex-shrink-0 flex items-center justify-center font-bold">A</div>
+                  <div className="max-w-xs md:max-w-md lg:max-w-sm rounded-lg px-4 py-2 bg-gray-800">
+                    <AiOutlineLoading3Quarters className="animate-spin text-gray-400" />
+                  </div>
+                </div>
+              )}
+              <div ref={aiChatEndRef} />
+            </div>
+            <form onSubmit={handleAiSubmit} className="p-3 border-t border-gray-800 flex gap-2">
+              <input
+                type="text"
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                placeholder="Chat with the AI..."
+                className="bg-gray-800 border border-gray-700 text-white w-full p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                disabled={isAiLoading}
+              />
+              <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md disabled:opacity-50" disabled={isAiLoading || !aiInput.trim()}>
+                <AiOutlineSend size={20} />
+              </button>
+            </form>
           </div>
 
           <div className="flex-grow flex flex-col gap-4 h-1/2">
