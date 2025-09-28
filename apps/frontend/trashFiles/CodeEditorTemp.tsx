@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import MonacoEditor from '@monaco-editor/react';
-import { userAtom } from "../atoms/userAtom";
+import { userAtom } from "../src/atoms/userAtom";
 import { useRecoilState } from "recoil";
 import { AiOutlineLoading3Quarters, AiOutlineSend, AiOutlineCopy, AiOutlineCheck } from "react-icons/ai"; // Import icons
-import { socketAtom } from "../atoms/socketAtom";
+import { socketAtom } from "../src/atoms/socketAtom";
 import { useNavigate, useParams } from "react-router-dom";
-import { connectedUsersAtom } from "../atoms/connectedUsersAtom";
-import { IP_ADDRESS } from "../Globle";
+import { connectedUsersAtom } from "../src/atoms/connectedUsersAtom";
+import { IP_ADDRESS } from "../src/Globle";
 
 // AI Message type
 type AiMessage = {
@@ -106,7 +106,6 @@ const CodeEditor: React.FC = () => {
         if (data.type === "ioSessions") setIoSessions(data.sessions);
         if (data.type === "activeIoSession") setActiveIoSessionId(data.sessionId);
         if (data.type === "output") {
-          console.log(data)
           setIoSessions(prev => prev.map(s => s.id === data.sessionId ? { ...s, output: [...s.output, data.message] } : s));
           handleButtonStatus("Run Code", false);
         }
@@ -200,7 +199,7 @@ const CodeEditor: React.FC = () => {
     `;
 
     try {
-      const apiKey = "AIzaSyCRGNHRid5tWcp99bMzklWNY_hK9T4ePnc";
+      const apiKey = "";
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
       const payload = {
         contents: [{ parts: [{ text: userQuery }] }],
